@@ -1,7 +1,8 @@
 # Build stage
 FROM golang:1.22 AS builder
 WORKDIR /app
-COPY go.mod .
+COPY go.mod go.sum ./
+RUN go mod download
 COPY main.go .
 RUN go build -o server .
 
@@ -9,7 +10,6 @@ RUN go build -o server .
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    fasm \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

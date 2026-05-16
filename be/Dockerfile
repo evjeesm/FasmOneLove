@@ -1,18 +1,19 @@
+# Build stage
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY main.go .
+RUN go build -o server .
+
+# Runtime stage
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    fasm \
-    netcat-openbsd \
+    fasm
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY test_fasm.sh /test_fasm.sh
-COPY server.sh /server.sh
-COPY tests /tests
-
-RUN chmod +x /test_fasm.sh /server.sh
-
-
-
+# Copy Go binary
+COPY --from=builder /app/server /server
 
 EXPOSE 8080
-CMD ["/server.sh"]
+CMD ["/server"]

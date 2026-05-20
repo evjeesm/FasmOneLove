@@ -1,13 +1,14 @@
 package queue
 
 import (
+	"os"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Types:
 
 type Status string
 
@@ -19,21 +20,25 @@ const (
 )
 
 type Result struct {
-	FasmOutput string `json:"fasm_output"`
-	RunOutput  string `json:"run_output"`
-	ExitCode   int    `json:"exit_code"`
+	FasmOutput    string `json:"fasm_output"`
+	RunOutput     string `json:"run_output"`
+	RunStderr     string `json:"run_stderr,omitempty"`
+	ExitCode      int    `json:"exit_code"`
+	OutputArchive []byte `json:"output_archive,omitempty"`
 }
 
 type Job struct {
-	ID        string    `json:"id"`
-	Status    Status    `json:"status"`
-	Position  int       `json:"position,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	Result    *Result   `json:"result,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	ID         string    `json:"id"`
+	Status     Status    `json:"status"`
+	Position   int       `json:"position,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	WorkDir    string    `json:"-"` // temp dir for this job, not exposed in API
+	Entrypoint string    `json:"-"` // fasm entrypoint file, not exposed in API
+	Result     *Result   `json:"result,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
-// ── Queue ─────────────────────────────────────────────────────────────────────
+// Queue:
 
 const (
 	MaxWorkers   = 3
@@ -64,11 +69,13 @@ func New(worker WorkerFunc) *Queue {
 }
 
 // Submit creates a new job, adds it to the queue and returns it.
-func (q *Queue) Submit() *Job {
+func (q *Queue) Submit(workDir, entrypoint string) *Job {
 	job := &Job{
-		ID:        uuid.New().String(),
-		Status:    StatusQueued,
-		CreatedAt: time.Now(),
+		ID:         uuid.New().String(),
+		Status:     StatusQueued,
+		CreatedAt:  time.Now(),
+		WorkDir:    workDir,
+		Entrypoint: entrypoint,
 	}
 
 	q.mu.Lock()
@@ -98,7 +105,13 @@ func (q *Queue) Get(id string) (*Job, bool) {
 func (q *Queue) dispatch(job *Job) {
 	select {
 	case q.workers <- struct{}{}:
-		defer func() { <-q.workers }()
+		defer func() {
+			<-q.workers
+			// Cleanup work dir after job finishes
+			if job.WorkDir != "" {
+				os.RemoveAll(job.WorkDir)
+			}
+		}()
 
 		q.mu.Lock()
 		job.Status = StatusRunning
@@ -112,6 +125,9 @@ func (q *Queue) dispatch(job *Job) {
 		job.Status = StatusError
 		job.Error = "server busy, try again later"
 		q.mu.Unlock()
+		if job.WorkDir != "" {
+			os.RemoveAll(job.WorkDir)
+		}
 	}
 }
 

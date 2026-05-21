@@ -179,6 +179,11 @@ func buildJail(binaryPath string) (string, error) {
 		return "", err
 	}
 
+	// For temporary file creation
+	if err = os.MkdirAll(filepath.Join(jail, "tmp"), 0777); err != nil {
+		return "", err
+	}
+
 	// Copy user binary into jail
 	if err := copyFile(binaryPath, filepath.Join(jail, "binary"), 0111); err != nil {
 		return "", fmt.Errorf("copy binary: %w", err)

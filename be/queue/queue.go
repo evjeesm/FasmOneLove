@@ -20,12 +20,17 @@ const (
 	StatusError   Status = "error"
 )
 
+type RunResult struct {
+	Output   string `json:"output"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code"`
+}
+
 type Result struct {
-	FasmOutput    string `json:"fasm_output"`
-	RunOutput     string `json:"run_output"`
-	RunStderr     string `json:"run_stderr,omitempty"`
-	ExitCode      int    `json:"exit_code"`
-	OutputArchive []byte `json:"output_archive,omitempty"`
+	FasmOutput    string      `json:"fasm_output"`
+	ExitCode      int         `json:"exit_code"`
+	OutputArchive []byte      `json:"output_archive,omitempty"`
+	Run           *RunResult  `json:"run,omitempty"`
 }
 
 type Job struct {

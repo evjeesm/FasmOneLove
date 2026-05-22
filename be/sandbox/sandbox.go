@@ -59,11 +59,15 @@ func Run(job *queue.Job) {
 	newFiles := packer.Diff(before, after)
 
 	// Optionally run binary in chroot + seccomp sandbox
-	var runOut, runErr string
-	var runExit int
+	var runResult *queue.RunResult
 	if req.Run {
 		outPath := resolveOutput(req, srcPath, job.WorkDir)
-		runOut, runErr, runExit = runSandboxed(outPath, buildEnv(req.RunEnv))
+		runOut, runErr, runExit := runSandboxed(outPath, buildEnv(req.RunEnv))
+		runResult = &queue.RunResult{
+			Output:   runOut,
+			Stderr:   runErr,
+			ExitCode: runExit,
+		}
 	}
 
 	// Pack output files
@@ -79,10 +83,9 @@ func Run(job *queue.Job) {
 	job.Status = queue.StatusDone
 	job.Result = &queue.Result{
 		FasmOutput:    fasmOut + fasmErr,
-		RunOutput:     runOut,
-		RunStderr:     runErr,
-		ExitCode:      runExit,
+		ExitCode:      fasmExit,
 		OutputArchive: outputArchive,
+		Run:           runResult,
 	}
 }
 

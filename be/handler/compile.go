@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"fasmonelove/api"
 	"fasmonelove/packer"
 	"fasmonelove/queue"
 
@@ -21,12 +22,25 @@ func Compile(q *queue.Queue) http.HandlerFunc {
 			return
 		}
 
-		// Parse multipart form (max 1MB)
 		if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 			http.Error(w, "request too large or malformed", http.StatusBadRequest)
 			return
 		}
 
+		// Parse options JSON
+		var req api.CompileRequest
+		optionsStr := r.FormValue("options")
+		if optionsStr != "" {
+			if err := json.Unmarshal([]byte(optionsStr), &req); err != nil {
+				http.Error(w, "invalid options JSON: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if req.Entrypoint == "" {
+			req.Entrypoint = "main.asm"
+		}
+
+		// Read archive
 		f, _, err := r.FormFile("archive")
 		if err != nil {
 			http.Error(w, "missing 'archive' field", http.StatusBadRequest)
@@ -34,7 +48,6 @@ func Compile(q *queue.Queue) http.HandlerFunc {
 		}
 		defer f.Close()
 
-		// Read archive bytes (limit to 1MB)
 		tarBytes, err := io.ReadAll(io.LimitReader(f, maxUploadBytes+1))
 		if err != nil {
 			http.Error(w, "failed to read archive", http.StatusInternalServerError)
@@ -45,14 +58,13 @@ func Compile(q *queue.Queue) http.HandlerFunc {
 			return
 		}
 
-		// Create work dir for this job
+		// Create work dir and extract
 		workDir := "/tmp/" + uuid.New().String()
 		if err := os.MkdirAll(workDir, 0755); err != nil {
 			http.Error(w, "failed to create work dir", http.StatusInternalServerError)
 			return
 		}
 
-		// Extract archive into work dir
 		if err := packer.Extract(tarBytes, workDir); err != nil {
 			os.RemoveAll(workDir)
 			http.Error(w, "invalid archive: "+err.Error(), http.StatusBadRequest)
@@ -60,15 +72,7 @@ func Compile(q *queue.Queue) http.HandlerFunc {
 		}
 
 		// Submit job
-		entrypoint := r.FormValue("entrypoint")
-		if entrypoint == "" {
-			entrypoint = "main.asm"
-		}
-
-		// Fasm Options
-		opts := r.FormValue("fasmOptions")
-
-		job := q.Submit(workDir, entrypoint)
+		job := q.Submit(workDir, req)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)

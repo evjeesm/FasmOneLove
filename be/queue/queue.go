@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"fasmonelove/api"
 	"github.com/google/uuid"
 )
 
@@ -28,14 +29,14 @@ type Result struct {
 }
 
 type Job struct {
-	ID         string    `json:"id"`
-	Status     Status    `json:"status"`
-	Position   int       `json:"position,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	WorkDir    string    `json:"-"` // temp dir for this job, not exposed in API
-	Entrypoint string    `json:"-"` // fasm entrypoint file, not exposed in API
-	Result     *Result   `json:"result,omitempty"`
-	Error      string    `json:"error,omitempty"`
+	ID        string             `json:"id"`
+	Status    Status             `json:"status"`
+	Position  int                `json:"position,omitempty"`
+	CreatedAt time.Time          `json:"created_at"`
+	WorkDir   string             `json:"-"`
+	Request   api.CompileRequest `json:"-"`
+	Result    *Result            `json:"result,omitempty"`
+	Error     string             `json:"error,omitempty"`
 }
 
 // Queue:
@@ -69,13 +70,13 @@ func New(worker WorkerFunc) *Queue {
 }
 
 // Submit creates a new job, adds it to the queue and returns it.
-func (q *Queue) Submit(workDir, entrypoint string) *Job {
+func (q *Queue) Submit(workDir string, req api.CompileRequest) *Job {
 	job := &Job{
-		ID:         uuid.New().String(),
-		Status:     StatusQueued,
-		CreatedAt:  time.Now(),
-		WorkDir:    workDir,
-		Entrypoint: entrypoint,
+		ID:        uuid.New().String(),
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
+		WorkDir:   workDir,
+		Request:   req,
 	}
 
 	q.mu.Lock()

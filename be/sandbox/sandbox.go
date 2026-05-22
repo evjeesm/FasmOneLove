@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"fasmonelove/api"
 	"fasmonelove/packer"
 	"fasmonelove/queue"
 )
@@ -22,29 +23,24 @@ const (
 	maxFileBytes   = 512 * 1024       // 512KB
 )
 
-type FasmOptions struct {
-	Output    *string           `json:"output,omitempty"`
-	Defines   map[string]string `json:"defines,omitempty"`
-	Memory    *int              `json:"memory,omitempty"`
-	MaxPasses *int              `json:"maxPasses,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-}
-
 // Run is the real WorkerFunc — compiles with fasm,
-// runs the output binary with chroot + seccomp + resource limits.
+// optionally runs the output binary with chroot + seccomp + resource limits.
 func Run(job *queue.Job) {
-	// Make a snapshot of the workDir before run
+	req := job.Request
+
+	// Snapshot before compile
 	before, err := packer.Snapshot(job.WorkDir)
 	if err != nil {
 		fail(job, "snapshot failed: "+err.Error())
 		return
 	}
 
-	// Execute job
-	srcPath := filepath.Join(job.WorkDir, job.Entrypoint)
-	outPath := filepath.Join(job.WorkDir, "output")
+	// Compile with fasm
+	srcPath := filepath.Join(job.WorkDir, req.Entrypoint)
+	args := buildFasmArgs(req, srcPath, job.WorkDir)
+	env := buildEnv(req.FasmEnv)
 
-	fasmOut, fasmErr, fasmExit := runFasm(srcPath, outPath)
+	fasmOut, fasmErr, fasmExit := runFasm(args, env)
 	if fasmExit != 0 {
 		job.Status = queue.StatusDone
 		job.Result = &queue.Result{
@@ -54,7 +50,7 @@ func Run(job *queue.Job) {
 		return
 	}
 
-	// Snapshot after fasm job is done
+	// Snapshot after compile
 	after, err := packer.Snapshot(job.WorkDir)
 	if err != nil {
 		fail(job, "post-snapshot failed: "+err.Error())
@@ -62,9 +58,13 @@ func Run(job *queue.Job) {
 	}
 	newFiles := packer.Diff(before, after)
 
-	// Sandbox run resulting binary produced by FASM
-	// TODO: Make this configurable by the user request
-	runOut, runErr, runExit := runSandboxed(outPath)
+	// Optionally run binary in chroot + seccomp sandbox
+	var runOut, runErr string
+	var runExit int
+	if req.Run {
+		outPath := resolveOutput(req, srcPath, job.WorkDir)
+		runOut, runErr, runExit = runSandboxed(outPath, buildEnv(req.RunEnv))
+	}
 
 	// Pack output files
 	var outputArchive []byte
@@ -86,9 +86,60 @@ func Run(job *queue.Job) {
 	}
 }
 
-// runFasm compiles src -> out using fasm binary.
-func runFasm(src, out string) (stdout, stderr string, exitCode int) {
-	cmd := exec.Command(fasmPath, src, out)
+// buildFasmArgs constructs fasm command line from CompileRequest.
+func buildFasmArgs(req api.CompileRequest, srcPath, workDir string) []string {
+	var args []string
+
+	if req.Memory > 0 {
+		args = append(args, "-m", fmt.Sprintf("%d", req.Memory))
+	}
+	if req.MaxPasses > 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", req.MaxPasses))
+	}
+	for name, value := range req.Defines {
+		if value == "" {
+			args = append(args, "-d", name)
+		} else {
+			args = append(args, "-d", fmt.Sprintf("%s=%s", name, value))
+		}
+	}
+
+	args = append(args, srcPath)
+
+	if req.Output != "" {
+		args = append(args, filepath.Join(workDir, req.Output))
+	}
+
+	return args
+}
+
+// buildEnv converts a map to KEY=VALUE slice.
+func buildEnv(m map[string]string) []string {
+	var env []string
+	for k, v := range m {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	return env
+}
+
+// resolveOutput finds the output binary path after compilation.
+// If Output is specified use that, otherwise find the new file fasm created.
+func resolveOutput(req api.CompileRequest, srcPath, workDir string) string {
+	if req.Output != "" {
+		return filepath.Join(workDir, req.Output)
+	}
+	// Fasm default: strip .asm extension
+	base := srcPath
+	if filepath.Ext(base) == ".asm" {
+		base = base[:len(base)-4]
+	}
+	return base
+}
+
+// runFasm compiles using fasm binary with given args and env.
+func runFasm(args, env []string) (stdout, stderr string, exitCode int) {
+	cmd := exec.Command(fasmPath, args...)
+	cmd.Env = env
 
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
@@ -119,15 +170,16 @@ func runFasm(src, out string) (stdout, stderr string, exitCode int) {
 // runSandboxed runs the compiled binary inside a chroot jail.
 // The jail contains: the user binary + runner binary + essential libs.
 // runner applies rlimits + seccomp then execs the user binary.
-func runSandboxed(binaryPath string) (stdout, stderr string, exitCode int) {
+func runSandboxed(binaryPath string, env []string) (stdout, stderr string, exitCode int) {
 	jail, err := buildJail(binaryPath)
-	defer os.RemoveAll(jail)
 	if err != nil {
 		return "", fmt.Sprintf("failed to build jail: %v", err), 1
 	}
+	defer os.RemoveAll(jail)
 
 	// Run: chroot into jail, execute runner /binary
 	cmd := exec.Command("/runner", "/binary")
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Chroot: jail,
 		Credential: &syscall.Credential{
@@ -165,32 +217,34 @@ func runSandboxed(binaryPath string) (stdout, stderr string, exitCode int) {
 }
 
 // buildJail creates a minimal chroot directory containing:
-// user binary + runner binary.
-// func do not cleans up itself on fail
-// NOTE: optional: copy essential libraries from lib and lib64
-func buildJail(binaryPath string) (string, error) {
-	jail, err := os.MkdirTemp("", "jail-*")
+// user binary + runner binary + essential shared libs.
+// Uses /var/jail/ as base to avoid noexec on /tmp.
+func buildJail(binaryPath string) (jail string, err error) {
+	// Ensure base jail dir exists
+	if err = os.MkdirAll("/tmp/jail", 0700); err != nil {
+		return "", fmt.Errorf("create jail base: %w", err)
+	}
+
+	jail, err = os.MkdirTemp("/tmp/jail", "jail-*")
 	if err != nil {
 		return "", err
 	}
 
-	err = os.Chmod(jail, 0711)
-	if err != nil {
+	// Cleanup on any failure — cancelled on success
+
+	if err = os.Chmod(jail, 0711); err != nil {
 		return "", err
 	}
 
-	// For temporary file creation
 	if err = os.MkdirAll(filepath.Join(jail, "tmp"), 0777); err != nil {
 		return "", err
 	}
 
-	// Copy user binary into jail
-	if err := copyFile(binaryPath, filepath.Join(jail, "binary"), 0111); err != nil {
+	if err = copyFile(binaryPath, filepath.Join(jail, "binary"), 0111); err != nil {
 		return "", fmt.Errorf("copy binary: %w", err)
 	}
 
-	// Copy runner binary into jail
-	if err := copyFile(runnerPath, filepath.Join(jail, "runner"), 0111); err != nil {
+	if err = copyFile(runnerPath, filepath.Join(jail, "runner"), 0111); err != nil {
 		return "", fmt.Errorf("copy runner: %w", err)
 	}
 

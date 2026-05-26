@@ -93,7 +93,7 @@ object WorkspaceManager {
         } catch (e: Exception) { CompileSettings() }
     }
 
-    private fun saveSettings(dir: File, settings: CompileSettings) {
+     fun saveSettings(dir: File, settings: CompileSettings) {
         val json = JSONObject().apply {
             put("entrypoint", settings.entrypoint)
             put("output", settings.output)

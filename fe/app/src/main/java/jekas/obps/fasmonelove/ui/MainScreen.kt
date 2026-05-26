@@ -8,7 +8,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import jekas.obps.fasmonelove.model.Workspace
+import jekas.obps.fasmonelove.model.WorkspaceManager
 import jekas.obps.fasmonelove.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -27,18 +30,32 @@ sealed class JobStatus {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
+    val context = LocalContext.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var currentWorkspace by remember { mutableStateOf<Workspace?>(null) }
     var jobStatus by remember { mutableStateOf<JobStatus>(JobStatus.Idle) }
     var outputExpanded by remember { mutableStateOf(false) }
     var outputText by remember { mutableStateOf("") }
+
+    // Load last opened workspace on start
+    LaunchedEffect(Unit) {
+        val lastOpened = WorkspaceManager.getLastOpened(context)
+        currentWorkspace = WorkspaceManager.listWorkspaces(context)
+            .firstOrNull { it.name == lastOpened }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             WorkspaceDrawer(
-                onWorkspaceOpened = { workspace ->
-                    // TODO: load workspace files
+                currentWorkspace = currentWorkspace,
+                onFileSelected = { file ->
+                    // TODO: open file in editor
+                    scope.launch { drawerState.close() }
+                },
+                onWorkspaceChanged = { workspace ->
+                    currentWorkspace = workspace
                     scope.launch { drawerState.close() }
                 }
             )

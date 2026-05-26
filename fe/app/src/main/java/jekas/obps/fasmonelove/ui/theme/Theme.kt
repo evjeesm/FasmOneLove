@@ -43,7 +43,7 @@ private val FasmTypography = Typography(
     bodyLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
-        fontSize   = 40.sp,
+        fontSize   = 16.sp,
         color      = TextWhite,
     ),
     bodyMedium = TextStyle(

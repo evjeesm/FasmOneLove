@@ -13,7 +13,11 @@ import androidx.compose.ui.unit.dp
 import jekas.obps.fasmonelove.model.Workspace
 import jekas.obps.fasmonelove.model.WorkspaceManager
 import jekas.obps.fasmonelove.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
+
+private const val AUTOSAVE_DELAY_MS = 2000L
 
 // ── Job status ────────────────────────────────────────────────────────────────
 
@@ -33,16 +37,48 @@ fun MainScreen() {
     val context = LocalContext.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
     var currentWorkspace by remember { mutableStateOf<Workspace?>(null) }
+    var currentFile by remember { mutableStateOf<File?>(null) }
+    var editorContent by remember { mutableStateOf("") }
+    var isDirty by remember { mutableStateOf(false) }
     var jobStatus by remember { mutableStateOf<JobStatus>(JobStatus.Idle) }
     var outputExpanded by remember { mutableStateOf(false) }
     var outputText by remember { mutableStateOf("") }
 
-    // Load last opened workspace on start
+    // ── Load last opened workspace on start ───────────────────────────────────
     LaunchedEffect(Unit) {
         val lastOpened = WorkspaceManager.getLastOpened(context)
         currentWorkspace = WorkspaceManager.listWorkspaces(context)
             .firstOrNull { it.name == lastOpened }
+
+        // Auto-open entrypoint file if workspace exists
+        currentWorkspace?.let { ws ->
+            val entrypoint = File(ws.path, ws.settings.entrypoint)
+            if (entrypoint.exists()) {
+                currentFile = entrypoint
+                editorContent = entrypoint.readText()
+            }
+        }
+    }
+
+    // ── Auto-save — triggers 2s after last content change ─────────────────────
+    LaunchedEffect(editorContent) {
+        if (!isDirty) return@LaunchedEffect
+        delay(AUTOSAVE_DELAY_MS)
+        currentFile?.writeText(editorContent)
+        isDirty = false
+    }
+
+    // ── Open file helper ──────────────────────────────────────────────────────
+    fun openFile(file: File) {
+        // Flush current file immediately before switching
+        if (isDirty) {
+            currentFile?.writeText(editorContent)
+            isDirty = false
+        }
+        currentFile = file
+        editorContent = file.readText()
     }
 
     ModalNavigationDrawer(
@@ -51,11 +87,14 @@ fun MainScreen() {
             WorkspaceDrawer(
                 currentWorkspace = currentWorkspace,
                 onFileSelected = { file ->
-                    // TODO: open file in editor
+                    openFile(file)
                     scope.launch { drawerState.close() }
                 },
                 onWorkspaceChanged = { workspace ->
                     currentWorkspace = workspace
+                    // Auto-open entrypoint of new workspace
+                    val entrypoint = File(workspace.path, workspace.settings.entrypoint)
+                    if (entrypoint.exists()) openFile(entrypoint)
                     scope.launch { drawerState.close() }
                 }
             )
@@ -65,7 +104,7 @@ fun MainScreen() {
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopBar(
-                    filename = "main.asm",
+                    filename = currentFile?.name ?: "no file",
                     jobStatus = jobStatus,
                     onMenuClick = { scope.launch { drawerState.open() } },
                     onRunClick = { /* TODO: trigger compile */ }
@@ -78,12 +117,15 @@ fun MainScreen() {
                     .padding(innerPadding)
             ) {
                 // ── Code editor ───────────────────────────────────────────────
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    CodeEditorView(modifier = Modifier.fillMaxSize())
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    CodeEditorView(
+                        modifier = Modifier.fillMaxSize(),
+                        content = editorContent,
+                        onContentChange = {
+                            editorContent = it
+                            isDirty = true
+                        }
+                    )
                 }
 
                 // ── Output panel ──────────────────────────────────────────────
@@ -116,20 +158,13 @@ fun TopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = filename,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                Text(filename, style = MaterialTheme.typography.titleMedium)
                 JobStatusChip(jobStatus)
             }
         },
         navigationIcon = {
             IconButton(onClick = onMenuClick) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Open file tree",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
+                Icon(Icons.Default.Menu, contentDescription = "Open file tree", tint = MaterialTheme.colorScheme.onSurface)
             }
         },
         actions = {
@@ -158,16 +193,9 @@ fun JobStatusChip(status: JobStatus) {
                 onClick = {},
                 label = { Text("Queue: ${status.position}") },
                 leadingIcon = {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = LinkBlue
-                    )
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = LinkBlue)
                 },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = SurfaceNavy,
-                    labelColor = TextWhite,
-                )
+                colors = AssistChipDefaults.assistChipColors(containerColor = SurfaceNavy, labelColor = TextWhite)
             )
         }
         is JobStatus.Running -> {
@@ -175,36 +203,23 @@ fun JobStatusChip(status: JobStatus) {
                 onClick = {},
                 label = { Text("Compiling...") },
                 leadingIcon = {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = LinkBlue
-                    )
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = LinkBlue)
                 },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = SurfaceNavy,
-                    labelColor = TextWhite,
-                )
+                colors = AssistChipDefaults.assistChipColors(containerColor = SurfaceNavy, labelColor = TextWhite)
             )
         }
         is JobStatus.Done -> {
             AssistChip(
                 onClick = {},
                 label = { Text("Done") },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = SurfaceNavy,
-                    labelColor = LinkBlue,
-                )
+                colors = AssistChipDefaults.assistChipColors(containerColor = SurfaceNavy, labelColor = LinkBlue)
             )
         }
         is JobStatus.Error -> {
             AssistChip(
                 onClick = {},
                 label = { Text("Error") },
-                colors = AssistChipDefaults.assistChipColors(
-                    containerColor = SurfaceNavy,
-                    labelColor = ErrorRed,
-                )
+                colors = AssistChipDefaults.assistChipColors(containerColor = SurfaceNavy, labelColor = ErrorRed)
             )
         }
     }
@@ -221,9 +236,11 @@ fun OutputPanel(
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp, max = if (expanded) 200.dp else 40.dp)
     ) {
         Column {
-            // Header row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -231,27 +248,20 @@ fun OutputPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "OUTPUT",
-                    style = MaterialTheme.typography.labelSmall,
-                )
+                Text("OUTPUT", style = MaterialTheme.typography.labelSmall)
                 TextButton(onClick = onToggle) {
                     Text(if (expanded) "∧" else "∨", color = TextMuted)
                 }
             }
-
-            // Output text
             if (expanded) {
                 Text(
                     text = text.ifEmpty { "No output yet." },
                     style = MonoStyle,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 200.dp)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
         }
     }
 }
-

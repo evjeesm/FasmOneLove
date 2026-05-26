@@ -36,8 +36,9 @@ fun MainScreen() {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            FileTreeDrawer(
-                onFileSelected = {
+            WorkspaceDrawer(
+                onWorkspaceOpened = { workspace ->
+                    // TODO: load workspace files
                     scope.launch { drawerState.close() }
                 }
             )
@@ -237,18 +238,3 @@ fun OutputPanel(
     }
 }
 
-// ── Placeholders (implemented separately) ─────────────────────────────────────
-
-@Composable
-fun FileTreeDrawer(onFileSelected: () -> Unit) {
-    // TODO: implement file tree
-    ModalDrawerSheet(
-        drawerContainerColor = MaterialTheme.colorScheme.surface,
-    ) {
-        Text(
-            "Files",
-            modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.titleMedium,
-        )
-    }
-}

@@ -4,6 +4,12 @@ import android.content.Context
 import org.json.JSONObject
 import java.io.File
 
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
+
 object WorkspaceManager {
 
     private fun workspacesRoot(context: Context): File {
@@ -11,6 +17,12 @@ object WorkspaceManager {
         root.mkdirs()
         return root
     }
+
+    fun walkFiles(root: File): Flow<File> = flow {
+        root.walk().forEach {
+            emit(it)
+        }
+    }.flowOn(Dispatchers.IO)
 
     private fun indexFile(context: Context) =
         File(context.getExternalFilesDir(null), "workspaces.json")

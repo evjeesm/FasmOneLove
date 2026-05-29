@@ -1,5 +1,6 @@
 package jekas.obps.fasmonelove.ui
 
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
@@ -10,14 +11,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import jekas.obps.fasmonelove.model.FileOperations
+import jekas.obps.fasmonelove.model.TextBuffer
 import jekas.obps.fasmonelove.model.Workspace
 import jekas.obps.fasmonelove.model.WorkspaceManager
 import jekas.obps.fasmonelove.ui.theme.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
-
-private const val AUTOSAVE_DELAY_MS = 2000L
 
 // ── Job status ────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,7 @@ sealed class JobStatus {
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
@@ -39,46 +40,64 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
 
     var currentWorkspace by remember { mutableStateOf<Workspace?>(null) }
-    var currentFile by remember { mutableStateOf<File?>(null) }
-    var editorContent by remember { mutableStateOf("") }
-    var isDirty by remember { mutableStateOf(false) }
+    var currentBuffer by remember { mutableStateOf<TextBuffer>(TextBuffer()) }
+
     var jobStatus by remember { mutableStateOf<JobStatus>(JobStatus.Idle) }
     var outputExpanded by remember { mutableStateOf(false) }
     var outputText by remember { mutableStateOf("") }
+
 
     // ── Load last opened workspace on start ───────────────────────────────────
     LaunchedEffect(Unit) {
         val lastOpened = WorkspaceManager.getLastOpened(context)
         currentWorkspace = WorkspaceManager.listWorkspaces(context)
             .firstOrNull { it.name == lastOpened }
+    }
+    val newFileDialogController = remember { NewFileDialogController() }
+    InvokableNewFileDialog(newFileDialogController, "New file", "", "Create")
 
-        // Auto-open entrypoint file if workspace exists
-        currentWorkspace?.let { ws ->
-            val entrypoint = File(ws.path, ws.settings.entrypoint)
-            if (entrypoint.exists()) {
-                currentFile = entrypoint
-                editorContent = entrypoint.readText()
+    val unsavedChangesDialogController = remember { UnsavedChangesDialogController() }
+    UnsavedChangesDialog(unsavedChangesDialogController)
+
+    suspend fun openFile(path: String) {
+        Log.d("openFile", "start, path = $path, currentBuffer.path = ${currentBuffer.path}")
+        if (path == currentBuffer.path) return
+        Log.d("openFile", "isDirty=${currentBuffer.isDirty}")
+        if (currentBuffer.isDirty) {
+            val result = unsavedChangesDialogController.awaitResult(currentBuffer.path)
+            when (result)
+            {
+                UnsavedChangesDialogValues.SAVE_CHANGES     -> { currentBuffer.save() }
+                UnsavedChangesDialogValues.DISCARD_CHANGES  -> {}
             }
         }
+        currentBuffer = TextBuffer(path)
     }
 
-    // ── Auto-save — triggers 2s after last content change ─────────────────────
-    LaunchedEffect(editorContent) {
-        if (!isDirty) return@LaunchedEffect
-        delay(AUTOSAVE_DELAY_MS)
-        currentFile?.writeText(editorContent)
-        isDirty = false
-    }
-
-    // ── Open file helper ──────────────────────────────────────────────────────
-    fun openFile(file: File) {
-        // Flush current file immediately before switching
-        if (isDirty) {
-            currentFile?.writeText(editorContent)
-            isDirty = false
+    suspend fun onBufferNameClick() {
+        if (currentBuffer.path == null)
+        {
+            val result = newFileDialogController.awaitResult()
+            when (result.value)
+            {
+                NewFileDialogController.Values.CONFIRM -> {
+                    val workspaceDir = File(currentWorkspace!!.path)
+                    val file = FileOperations.createFile(workspaceDir, result.filename)
+                    currentBuffer.setFile(file.path)
+                    currentBuffer.save()
+                    TODO("Update workspace drawer")
+                }
+                NewFileDialogController.Values.DISMISS -> {}
+            }
         }
-        currentFile = file
-        editorContent = file.readText()
+        else if (currentBuffer.isDirty) {
+            val result = unsavedChangesDialogController.awaitResult(currentBuffer.name)
+            when (result)
+            {
+                UnsavedChangesDialogValues.SAVE_CHANGES     -> { currentBuffer.save() }
+                UnsavedChangesDialogValues.DISCARD_CHANGES  -> { currentBuffer.reload()}
+            }
+        }
     }
 
     ModalNavigationDrawer(
@@ -87,15 +106,19 @@ fun MainScreen() {
             WorkspaceDrawer(
                 currentWorkspace = currentWorkspace,
                 onFileSelected = { file ->
-                    openFile(file)
-                    scope.launch { drawerState.close() }
+                    scope.launch {
+                        openFile(file.path)
+                        drawerState.close()
+                    }
                 },
                 onWorkspaceChanged = { workspace ->
                     currentWorkspace = workspace
                     // Auto-open entrypoint of new workspace
-                    val entrypoint = File(workspace.path, workspace.settings.entrypoint)
-                    if (entrypoint.exists()) openFile(entrypoint)
-                    scope.launch { drawerState.close() }
+                    scope.launch {
+                        val entrypoint = File(workspace.path, workspace.settings.entrypoint)
+                        if (entrypoint.exists()) openFile(entrypoint.path)
+                        drawerState.close()
+                    }
                 }
             )
         }
@@ -104,8 +127,10 @@ fun MainScreen() {
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopBar(
-                    filename = currentFile?.name ?: "no file",
+                    buffer = currentBuffer,
+                    filename = currentBuffer.name,
                     jobStatus = jobStatus,
+                    { scope.launch { onBufferNameClick() } },
                     onMenuClick = { scope.launch { drawerState.open() } },
                     onRunClick = { /* TODO: trigger compile */ }
                 )
@@ -117,13 +142,14 @@ fun MainScreen() {
                     .padding(innerPadding)
             ) {
                 // ── Code editor ───────────────────────────────────────────────
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Box(modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()) {
                     CodeEditorView(
                         modifier = Modifier.fillMaxSize(),
-                        content = editorContent,
-                        onContentChange = {
-                            editorContent = it
-                            isDirty = true
+                        content = currentBuffer.content,
+                        onContentChange = { text ->
+                            currentBuffer.content = text
                         }
                     )
                 }
@@ -144,8 +170,10 @@ fun MainScreen() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopBar(
+    buffer: TextBuffer,
     filename: String,
     jobStatus: JobStatus,
+    onBufferNameClick: () -> Unit,
     onMenuClick: () -> Unit,
     onRunClick: () -> Unit,
 ) {
@@ -158,7 +186,12 @@ fun TopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(filename, style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = onBufferNameClick) {
+                    Text(filename, style = MaterialTheme.typography.titleMedium)
+                    if (buffer.isDirty) {
+                        Text( "*", style = MaterialTheme.typography.titleMedium, color = ErrorRed)
+                    }
+                }
                 JobStatusChip(jobStatus)
             }
         },

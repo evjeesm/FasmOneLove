@@ -1,12 +1,18 @@
 package jekas.obps.fasmonelove.ui
 
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -16,8 +22,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import jekas.obps.fasmonelove.WorkspaceSettingsActivity
+import jekas.obps.fasmonelove.model.FileOperations
 import jekas.obps.fasmonelove.model.Workspace
 import jekas.obps.fasmonelove.model.WorkspaceManager
 import jekas.obps.fasmonelove.ui.theme.*
@@ -33,6 +41,7 @@ fun WorkspaceDrawer(
     var showPicker by remember { mutableStateOf(false) }
     var sourcesExpanded by remember { mutableStateOf(true) }
     var outputExpanded by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableStateOf(0) }
 
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surface,
@@ -90,7 +99,7 @@ fun WorkspaceDrawer(
                         containerColor = SurfaceNavy,
                         contentColor = LinkBlue,
                     ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderNavy),
+                    border = BorderStroke(1.dp, BorderNavy),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null)
@@ -102,11 +111,12 @@ fun WorkspaceDrawer(
             val workspaceDir = File(currentWorkspace.path)
             val outputDir = File(currentWorkspace.path, "output")
 
-            val sourceFiles = workspaceDir
-                .listFiles()
-                ?.filter { it.name != "output" && it.name != ".workspace.json" }
-                ?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
-                ?: emptyList()
+            val sourceFiles = remember(refreshKey) {
+                workspaceDir.listFiles()
+                    ?.filter { it.name != "output" && it.name != ".workspace.json" }
+                    ?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
+                    ?: emptyList()
+            }
 
             val outputFiles = outputDir
                 .listFiles()
@@ -116,18 +126,34 @@ fun WorkspaceDrawer(
             LazyColumn {
                 // ── Sources section ───────────────────────────────────────────
                 item {
-                    SectionHeader(
+                    SectionHeaderWithAdd(
                         title = "SOURCES",
                         expanded = sourcesExpanded,
-                        onToggle = { sourcesExpanded = !sourcesExpanded }
+                        onToggle = { sourcesExpanded = !sourcesExpanded },
+                        onNewFile = { name ->
+                            FileOperations.createFile(workspaceDir, name)
+                            refreshKey++
+                        }
                     )
                 }
                 if (sourcesExpanded) {
                     items(sourceFiles) { file ->
-                        FileTreeItem(
+                        FileTreeItemWithMenu(
                             file = file,
                             depth = 0,
                             onFileSelected = onFileSelected,
+                            onFileDeleted = { f ->
+                                FileOperations.deleteFile(f)
+                                refreshKey++
+                            },
+                            onFileDuplicated = { f ->
+                                FileOperations.duplicateFile(f)
+                                refreshKey++
+                            },
+                            onFileRenamed = { f, newName ->
+                                FileOperations.renameFile(f, newName)
+                                refreshKey++
+                            }
                         )
                     }
                 }
@@ -172,6 +198,7 @@ fun WorkspaceDrawer(
         WorkspacePickerDialog(
             onWorkspaceSelected = { workspace ->
                 onWorkspaceChanged(workspace)
+                refreshKey++
                 showPicker = false
             },
             onDismiss = { showPicker = false }
@@ -199,6 +226,72 @@ fun SectionHeader(title: String, expanded: Boolean, onToggle: () -> Unit) {
         Spacer(Modifier.width(4.dp))
         Text(title, style = MaterialTheme.typography.labelSmall)
     }
+}
+
+@Composable
+fun SectionHeaderWithAdd(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onNewFile: (String) -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    var showNewFileDialog by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .combinedClickable(onClick = onToggle)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(title, style = MaterialTheme.typography.labelSmall)
+            }
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add", tint = TextMuted, modifier = Modifier.size(16.dp))
+            }
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+            containerColor = SurfaceNavy,
+        ) {
+            DropdownMenuItem(
+                text = { Text("New File", color = TextWhite) },
+                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = TextMuted) },
+                onClick = { showMenu = false; showNewFileDialog = true }
+            )
+        }
+    }
+
+    if (showNewFileDialog) {
+        NewFileDialog(
+            title = "New File",
+            initialValue = "untitled.asm",
+            confirmLabel = "Create",
+            onConfirm = { name -> showNewFileDialog = false; onNewFile(name) },
+            onDismiss = { showNewFileDialog = false }
+        )
+    }
+
 }
 
 // ── File tree item ────────────────────────────────────────────────────────────
@@ -236,21 +329,143 @@ fun FileTreeItem(file: File, depth: Int, onFileSelected: (File) -> Unit) {
         Text(
             text = file.name,
             style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                fontFamily = FontFamily.Monospace,
                 color = if (file.isDirectory) LinkBlue else TextWhite,
             ),
         )
     }
+}
 
-    // Recursive children
-    if (file.isDirectory && expanded) {
-        file.listFiles()
-            ?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
-            ?.forEach { child ->
-                FileTreeItem(file = child, depth = depth + 1, onFileSelected = onFileSelected)
+// ── File context menu ─────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FileTreeItemWithMenu(
+    file: File,
+    depth: Int,
+    onFileSelected: (File) -> Unit,
+    onFileDeleted: (File) -> Unit,
+    onFileDuplicated: (File) -> Unit,
+    onFileRenamed: (File, String) -> Unit,
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {
+                        if (file.isDirectory) expanded = !expanded
+                        else onFileSelected(file)
+                    },
+                    onLongClick = { showMenu = true }
+                )
+                .padding(
+                    start = (16 + depth * 12).dp,
+                    top = 6.dp,
+                    bottom = 6.dp,
+                    end = 8.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (file.isDirectory) {
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(14.dp),
+                )
+            } else {
+                Spacer(Modifier.width(14.dp))
             }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = if (file.isDirectory) LinkBlue else TextWhite,
+                ),
+            )
+        }
+
+        // ── Context menu ──────────────────────────────────────────────────────
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+            containerColor = SurfaceNavy,
+        ) {
+            DropdownMenuItem(
+                text = { Text("Rename", color = TextWhite) },
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = TextMuted) },
+                onClick = { showMenu = false; showRenameDialog = true }
+            )
+            DropdownMenuItem(
+                text = { Text("Duplicate", color = TextWhite) },
+                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TextMuted) },
+                onClick = {
+                    showMenu = false
+                    onFileDuplicated(file)
+                }
+            )
+            HorizontalDivider(color = BorderNavy)
+            DropdownMenuItem(
+                text = { Text("Delete", color = ErrorRed) },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = ErrorRed) },
+                onClick = { showMenu = false; showDeleteDialog = true }
+            )
+        }
+    }
+
+    // ── Rename dialog ─────────────────────────────────────────────────────────
+    if (showRenameDialog) {
+        NewFileDialog(
+            title = "Rename",
+            initialValue = file.name,
+            confirmLabel = "Rename",
+            onConfirm = { newName ->
+                showRenameDialog = false
+                onFileRenamed(file, newName)
+            },
+            onDismiss = { showRenameDialog = false }
+        )
+    }
+
+    // ── Delete confirmation dialog ────────────────────────────────────────────
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            containerColor = SurfaceNavy,
+            title = { Text("Delete ${file.name}?", style = MaterialTheme.typography.titleMedium) },
+            text = {
+                Text(
+                    if (file.isDirectory) "This will delete the folder and all its contents."
+                    else "This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showDeleteDialog = false; onFileDeleted(file) }) {
+                    Text("Delete", color = ErrorRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel", color = TextMuted)
+                }
+            }
+        )
     }
 }
+
+
+
+
+
 
 // ── Workspace picker dialog ───────────────────────────────────────────────────
 

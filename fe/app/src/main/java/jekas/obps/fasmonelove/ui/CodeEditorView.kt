@@ -1,15 +1,20 @@
 package jekas.obps.fasmonelove.ui
 
+import android.graphics.Typeface
+import android.util.Log
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.res.ResourcesCompat.getFont
+import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
+import jekas.obps.fasmonelove.R
 
 @Composable
 fun CodeEditorView(
     modifier: Modifier = Modifier,
-    content: String = "",
+    content: String,
     onContentChange: (String) -> Unit = {},
 ) {
     AndroidView(
@@ -27,17 +32,26 @@ fun CodeEditorView(
                     setColor(EditorColorScheme.SELECTION_INSERT,       0xFF7EB8D4.toInt())
                 }
 
-                setTextSize(13f)
+                // Set monospace font
+                setTypefaceText(Typeface.MONOSPACE)
+
+                 val typeface = getFont(context, R.font.mononoki_nerd_font_mono_regular)
+                 setTypefaceText(typeface)
+
+                setTextSize(16f)
                 setText(content)
 
                 subscribeEvent(
-                    io.github.rosemoe.sora.event.ContentChangeEvent::class.java
+                    ContentChangeEvent::class.java
                 ) { _, _ ->
+                    Log.d("CodeEditorView", "ContentChangeEvent")
                     onContentChange(text.toString())
                 }
             }
         },
         update = { editor ->
+            editor.typefaceText = Typeface.MONOSPACE
+            Log.d("CodeEditorView", "Update")
             if (editor.text.toString() != content) {
                 editor.setText(content)
             }

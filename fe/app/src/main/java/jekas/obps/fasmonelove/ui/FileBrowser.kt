@@ -1,9 +1,6 @@
 package jekas.obps.fasmonelove.ui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,24 +13,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Output
-import androidx.compose.material.icons.filled.Source
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,16 +29,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import jekas.obps.fasmonelove.model.FileOperations
-import jekas.obps.fasmonelove.model.FileTree
+import jekas.obps.fasmonelove.filetree.FileTree
+import jekas.obps.fasmonelove.filetree.FileTreeViewModel
 import jekas.obps.fasmonelove.model.Workspace
 import jekas.obps.fasmonelove.ui.theme.BorderNavy
-import jekas.obps.fasmonelove.ui.theme.ErrorRed
 import jekas.obps.fasmonelove.ui.theme.LinkBlue
-import jekas.obps.fasmonelove.ui.theme.SurfaceNavy
 import jekas.obps.fasmonelove.ui.theme.TextMuted
 import jekas.obps.fasmonelove.ui.theme.TextWhite
-import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
@@ -108,7 +91,13 @@ fun FileBrowser(
 //                )
 //            }
 //        }
-        FileTreeView(workspaceDir.toPath(), onFileSelected)
+        FileTree(
+            FileTreeViewModel(
+                root = workspaceDir,
+                hide = null,
+                onFileSelected = onFileSelected)
+        )
+
         LazyColumn (modifier = Modifier.run { defaultMinSize(minHeight = 50.dp).weight(if (outputExpanded) 0.5f else 0.075f) }) {
             // ── Output section ────────────────────────────────────────────
             item {

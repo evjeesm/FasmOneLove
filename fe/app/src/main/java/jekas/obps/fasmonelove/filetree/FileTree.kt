@@ -1,4 +1,4 @@
-package jekas.obps.fasmonelove.ui
+package jekas.obps.fasmonelove.filetree
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -40,7 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import jekas.obps.fasmonelove.model.FileOperations
-import jekas.obps.fasmonelove.model.FileTree
+import jekas.obps.fasmonelove.ui.NewFileDialog
 import jekas.obps.fasmonelove.ui.theme.BorderNavy
 import jekas.obps.fasmonelove.ui.theme.ErrorRed
 import jekas.obps.fasmonelove.ui.theme.LinkBlue
@@ -49,22 +49,15 @@ import jekas.obps.fasmonelove.ui.theme.TextMuted
 import jekas.obps.fasmonelove.ui.theme.TextWhite
 import kotlinx.coroutines.launch
 import java.io.File
-import java.nio.file.Path
-import kotlin.io.path.isDirectory
 
 @Composable
-fun FileTreeView(
-    root: Path,
-    onFileSelected: (File) -> Unit
+fun FileTree(
+    vm: FileTreeViewModel
 ) {
     val scope = rememberCoroutineScope()
-    assert(root.isDirectory())
-
-    val tree by remember { mutableStateOf( FileTree(root) ) }
-
 
     LaunchedEffect(Unit) {
-        scope.launch { tree.watch() }
+        scope.launch { vm.watch() }
     }
 
     LazyColumn {
@@ -73,15 +66,15 @@ fun FileTreeView(
             SectionHeaderWithAdd(
                 title = "SOURCES",
                 onNewFile = { name ->
-                    FileOperations.createFile(root.toFile(), name)
+                    FileOperations.createFile(vm.root!!, name)
                 }
             )
         }
-        items(tree.files.toList()) { file ->
+        items(vm.files) { file ->
             FileTreeItemWithMenu(
                 file = file,
                 depth = 0,
-                onFileSelected = onFileSelected,
+                onFileSelected = vm.onFileSelected,
                 onFileDeleted = { f ->
                     FileOperations.deleteFile(f)
                 },

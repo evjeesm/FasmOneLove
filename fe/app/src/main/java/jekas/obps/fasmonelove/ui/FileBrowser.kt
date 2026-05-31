@@ -7,8 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,12 +15,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Output
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material3.AlertDialog
@@ -60,6 +59,7 @@ fun FileBrowser(
     val workspaceDir = File(currentWorkspace.path)
     val outputDir = File(currentWorkspace.path, "output")
     var refreshKey by remember { mutableStateOf(0) }
+    var outputExpanded by remember { mutableStateOf(false) }
 
     val sourceFiles = remember(refreshKey) {
         workspaceDir.listFiles()
@@ -74,8 +74,8 @@ fun FileBrowser(
         ?: emptyList()
 
 
-    Column (Modifier.fillMaxHeight(0.5f)) {
-        LazyColumn {
+    Column {
+        LazyColumn (modifier = Modifier.weight(0.5f)) {
             // ── Sources section ───────────────────────────────────────────
             item {
                 SectionHeaderWithAdd(
@@ -106,46 +106,49 @@ fun FileBrowser(
                 )
             }
         }
-    }
-    LazyColumn {
-        // ── Output section ────────────────────────────────────────────
-        item {
-            HorizontalDivider(
-                color = BorderNavy,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
-            SectionHeader(
-                title = "OUTPUT",
-            )
-        }
-        if (outputFiles.isEmpty()) {
+        LazyColumn (modifier = Modifier.run { defaultMinSize(minHeight = 50.dp).weight(if (outputExpanded) 0.5f else 0.075f) }) {
+            // ── Output section ────────────────────────────────────────────
             item {
-                Text(
-                    "No output yet",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(start = 24.dp, top = 4.dp, bottom = 4.dp),
+                HorizontalDivider(
+                    color = BorderNavy,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+                SectionHeader(
+                    title = "OUTPUT",
+                    onToggle = { outputExpanded = !outputExpanded }
                 )
             }
-        } else {
-            items(outputFiles) { file ->
-                FileTreeItem(
-                    file = file,
-                    depth = 0,
-                    onFileSelected = onFileSelected,
-                )
+            if (outputExpanded) {
+                if (outputFiles.isEmpty()) {
+                    item {
+                        Text(
+                            "No output yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 24.dp, top = 4.dp, bottom = 4.dp),
+                        )
+                    }
+                } else {
+                    items(outputFiles) { file ->
+                        FileTreeItem(
+                            file = file,
+                            depth = 0,
+                            onFileSelected = onFileSelected,
+                        )
+                    }
+                }
             }
         }
     }
-
 }
 
 // ── Section header ────────────────────────────────────────────────────────────
 
 @Composable
-fun SectionHeader(title: String) {
+fun SectionHeader(title: String, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onToggle() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -246,7 +249,7 @@ fun FileTreeItem(file: File, depth: Int, onFileSelected: (File) -> Unit) {
     ) {
         if (file.isDirectory) {
             Icon(
-                if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = TextMuted,
                 modifier = Modifier.size(14.dp),
@@ -303,7 +306,7 @@ fun FileTreeItemWithMenu(
         ) {
             if (file.isDirectory) {
                 Icon(
-                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
                     tint = TextMuted,
                     modifier = Modifier.size(14.dp),
@@ -315,7 +318,7 @@ fun FileTreeItemWithMenu(
             Text(
                 text = file.name,
                 style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontFamily = FontFamily.Monospace,
                     color = if (file.isDirectory) LinkBlue else TextWhite,
                 ),
             )
